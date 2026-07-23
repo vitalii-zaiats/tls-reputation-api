@@ -45,7 +45,8 @@ Swapping FastAPI for another framework is a new `adapters/http` and nothing else
 ## Deploy
 
 `uv`-based Dockerfile builds the image; CI publishes it to
-`ghcr.io/vitalii-zaiats/tls-reputation-backend`. The Ansible playbook in the
-monorepo deploys that image to the host (see the monorepo's `make deploy-backend`).
+`ghcr.io/vitalii-zaiats/tls-reputation-api`. The Ansible playbook in the monorepo
+deploys that image to the host (point `make deploy-backend` at this package at
+cutover).
 
 Licence: Apache-2.0. Corpus data: CC BY 4.0.

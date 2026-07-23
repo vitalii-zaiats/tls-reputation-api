@@ -54,8 +54,11 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          # Same image name the monorepo Ansible already deploys.
-          images: ghcr.io/vitalii-zaiats/tls-reputation-backend
+          # This repo owns its own package, so GITHUB_TOKEN can create + push it.
+          # (The old monorepo package tls-reputation-backend is linked to the
+          # monorepo and would 403 a push from here without an explicit grant.)
+          # The monorepo's deploy points at this image at cutover.
+          images: ghcr.io/vitalii-zaiats/tls-reputation-api
           tags: |
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
