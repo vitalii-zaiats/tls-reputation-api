@@ -190,6 +190,32 @@ def _sni_order(sort: str, direction: str) -> str:
     return f"{col} {_DIR.get(direction, 'DESC')}, sni ASC"
 
 
+# A ClientHello's SNI rolled up to its registrable domain (eTLD+1). A heuristic,
+# not the full Public Suffix List: keep three labels when the last two look like
+# a country-code second level (co.uk, com.br, ...), two otherwise. Enough to
+# collapse subdomain noise -- e.g. the per-widget *.w.hcaptcha.com hosts -- into
+# one row without a PSL dependency. Interpolated as a trusted constant, never
+# from caller input.
+_ROOT_DOMAIN_SQL = (
+    "CASE WHEN sni ~ '[.](co|com|net|org|gov|edu|ac|or|ne|go|gob|mil)[.][a-z]{2}$'"
+    " THEN (regexp_match(sni, '([^.]+[.][^.]+[.][a-z]{2})$'))[1]"
+    " ELSE COALESCE((regexp_match(sni, '([^.]+[.][^.]+)$'))[1], sni) END"
+)
+
+_ROOT_SORT_COLS = {
+    "observations": "observations",
+    "hostnames": "hostnames",
+    "domain": "domain",
+}
+ROOT_SORT_KEYS = tuple(_ROOT_SORT_COLS)
+
+
+def _root_order(sort: str, direction: str) -> str:
+    # `domain` is the group key, so it is the stable final tiebreak.
+    col = _ROOT_SORT_COLS.get(sort, _ROOT_SORT_COLS["observations"])
+    return f"{col} {_DIR.get(direction, 'DESC')}, domain ASC"
+
+
 class PostgresFingerprintRepository:
     """asyncpg-backed implementation of the `FingerprintRepository` port.
 
@@ -520,6 +546,28 @@ class PostgresFingerprintRepository:
                     offset,
                 )
                 total = await conn.fetchval("SELECT count(*) FROM snis")
+        return [dict(row) for row in rows], total
+
+    async def list_roots(
+        self, sort: str, limit: int, offset: int, direction: str
+    ) -> tuple[list[dict], int]:
+        """Registrable domains: every SNI rolled up to its eTLD+1, with the
+        count of distinct hostnames folded into it and their summed
+        observations. Collapses subdomain noise. Returns (rows, total)."""
+        order = _root_order(sort, direction)
+        async with self._require_pool().acquire() as conn:
+            rows = await conn.fetch(
+                "WITH base AS ("
+                f"SELECT {_ROOT_DOMAIN_SQL} AS domain, observations FROM snis)"
+                " SELECT domain, count(*) AS hostnames,"
+                " sum(observations)::bigint AS observations"
+                f" FROM base GROUP BY domain ORDER BY {order} LIMIT $1 OFFSET $2",
+                limit,
+                offset,
+            )
+            total = await conn.fetchval(
+                f"SELECT count(DISTINCT {_ROOT_DOMAIN_SQL}) FROM snis"
+            )
         return [dict(row) for row in rows], total
 
     async def stats(self) -> dict:

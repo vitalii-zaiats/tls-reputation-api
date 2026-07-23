@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 
 from ...application.use_cases import ApplicationError, UseCases
 from ...config import settings
-from ..persistence.postgres import SNI_SORT_KEYS, SORT_DIRS, SORT_KEYS
+from ..persistence.postgres import ROOT_SORT_KEYS, SNI_SORT_KEYS, SORT_DIRS, SORT_KEYS
 from .schemas import ClientHelloIn, IngestBatch
 
 public_router = APIRouter(prefix="/api/v1", tags=["public"])
@@ -148,6 +148,24 @@ async def list_snis(
     """
     limit = min(limit, settings.max_limit)
     return await _uc(request).list_snis(sort, dir, limit, offset, category)
+
+
+@public_router.get("/roots", summary="Browse registrable (base) domains")
+async def list_roots(
+    request: Request,
+    sort: str = Query("observations", pattern="|".join(ROOT_SORT_KEYS)),
+    dir: str = Query("desc", pattern="|".join(SORT_DIRS)),
+    limit: int = Query(50, ge=1),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """Every observed SNI rolled up to its registrable domain (eTLD+1).
+
+    Collapses subdomain sprawl -- the hundreds of per-widget *.w.hcaptcha.com
+    hosts become one `hcaptcha.com` row. `hostnames` is how many distinct SNIs
+    fold into each domain.
+    """
+    limit = min(limit, settings.max_limit)
+    return await _uc(request).list_roots(sort, dir, limit, offset)
 
 
 @public_router.get("/search", summary="Detect input type and resolve it")

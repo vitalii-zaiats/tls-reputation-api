@@ -419,6 +419,22 @@ class UseCases:
             "total": total,
         }
 
+    async def list_roots(
+        self, sort: str, direction: str, limit: int, offset: int
+    ) -> dict:
+        rows, total = await self._repo.list_roots(sort, limit, offset, direction)
+        return {
+            "items": [
+                {
+                    "domain": r["domain"],
+                    "hostnames": int(r["hostnames"]),
+                    "observations": int(r["observations"]),
+                }
+                for r in rows
+            ],
+            "total": total,
+        }
+
     async def search(self, q: str, *, top_snis: int) -> dict:
         """One box for all three input kinds — the site's front door.
 
