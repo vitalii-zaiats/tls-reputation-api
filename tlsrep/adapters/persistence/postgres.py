@@ -203,8 +203,11 @@ _ROOT_DOMAIN_SQL = (
 )
 
 _ROOT_SORT_COLS = {
-    "observations": "observations",
-    "hostnames": "hostnames",
+    "observations": "sum(count)",
+    "hostnames": "count(DISTINCT sni)",
+    "clients": "count(DISTINCT fingerprint_id)",
+    # obs-per-client: high means one operator hammering, low means broad traffic.
+    "targeting": "sum(count)::numeric / NULLIF(count(DISTINCT fingerprint_id), 0)",
     "domain": "domain",
 }
 ROOT_SORT_KEYS = tuple(_ROOT_SORT_COLS)
@@ -552,15 +555,22 @@ class PostgresFingerprintRepository:
         self, sort: str, limit: int, offset: int, direction: str
     ) -> tuple[list[dict], int]:
         """Registrable domains: every SNI rolled up to its eTLD+1, with the
-        count of distinct hostnames folded into it and their summed
-        observations. Collapses subdomain noise. Returns (rows, total)."""
+        distinct hostnames and distinct client fingerprints folded into it and
+        their summed observations. `clients` is the tell — a big observation
+        count behind few clients is one operator hammering, not broad traffic.
+
+        It needs per-observation fingerprints, so this scans the observations
+        table (a few hundred ms) rather than the snis summary; `total` counts the
+        same roots from the small snis table. Returns (rows, total)."""
         order = _root_order(sort, direction)
         async with self._require_pool().acquire() as conn:
             rows = await conn.fetch(
                 "WITH base AS ("
-                f"SELECT {_ROOT_DOMAIN_SQL} AS domain, observations FROM snis)"
-                " SELECT domain, count(*) AS hostnames,"
-                " sum(observations)::bigint AS observations"
+                f"SELECT {_ROOT_DOMAIN_SQL} AS domain, sni, fingerprint_id, count"
+                " FROM observations)"
+                " SELECT domain, count(DISTINCT sni) AS hostnames,"
+                " count(DISTINCT fingerprint_id) AS clients,"
+                " sum(count)::bigint AS observations"
                 f" FROM base GROUP BY domain ORDER BY {order} LIMIT $1 OFFSET $2",
                 limit,
                 offset,

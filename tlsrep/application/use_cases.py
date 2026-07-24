@@ -428,6 +428,7 @@ class UseCases:
                 {
                     "domain": r["domain"],
                     "hostnames": int(r["hostnames"]),
+                    "clients": int(r["clients"]),
                     "observations": int(r["observations"]),
                 }
                 for r in rows

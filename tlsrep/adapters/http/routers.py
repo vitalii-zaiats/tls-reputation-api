@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import secrets
 
-from fastapi import APIRouter, FastAPI, Header, Path, Query, Request
+from fastapi import APIRouter, FastAPI, Header, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from ...application.use_cases import ApplicationError, UseCases
@@ -153,6 +153,7 @@ async def list_snis(
 @public_router.get("/roots", summary="Browse registrable (base) domains")
 async def list_roots(
     request: Request,
+    response: Response,
     sort: str = Query("observations", pattern="|".join(ROOT_SORT_KEYS)),
     dir: str = Query("desc", pattern="|".join(SORT_DIRS)),
     limit: int = Query(50, ge=1),
@@ -162,8 +163,12 @@ async def list_roots(
 
     Collapses subdomain sprawl -- the hundreds of per-widget *.w.hcaptcha.com
     hosts become one `hcaptcha.com` row. `hostnames` is how many distinct SNIs
-    fold into each domain.
+    fold into each; `clients` the distinct fingerprints reaching it (few clients
+    behind many observations is one operator hammering). `sort=targeting` ranks
+    by observations-per-client.
     """
+    # The rollup scans the observations table, so let the edge cache it briefly.
+    response.headers["Cache-Control"] = "public, max-age=120"
     limit = min(limit, settings.max_limit)
     return await _uc(request).list_roots(sort, dir, limit, offset)
 
