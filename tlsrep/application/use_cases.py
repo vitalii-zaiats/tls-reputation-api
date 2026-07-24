@@ -31,6 +31,28 @@ from ..domain.fingerprinting.names import (
 )
 from ..domain.reputation import sni_category, stability
 from .ports import FingerprintRepository, Row
+from .responses import (
+    AlpnDistribution,
+    AlpnItem,
+    ClientSegment,
+    DomainDetail,
+    DomainList,
+    FingerprintDetail,
+    FingerprintList,
+    FingerprintReach,
+    FingerprintSummary,
+    Graph,
+    GraphEdge,
+    GraphNode,
+    IngestResult,
+    KnownClient,
+    ReputationResult,
+    RootHostnameList,
+    RootList,
+    SearchResult,
+    StabilityView,
+    Stats,
+)
 
 log = logging.getLogger(__name__)
 
@@ -105,14 +127,14 @@ class UseCases:
 
     # ── serialisation helpers (were _stability / _summary / known_client) ────
 
-    def _known(self, ja4: str | None, alpn: list[str] | None) -> dict | None:
+    def _known(self, ja4: str | None, alpn: list[str] | None) -> KnownClient | None:
         """The old `known_client` shape: {name, env, label} or None."""
         hit = match_known(self._catalogue, ja4, alpn)
         if hit is None:
             return None
         return {"name": hit.name, "env": hit.env, "label": hit.label}
 
-    def _stability(self, row: Row, dominant: int = 0) -> dict:
+    def _stability(self, row: Row, dominant: int = 0) -> StabilityView:
         """The old `_stability` dict, built from a domain `Stability`."""
         s = stability(
             observations=row["observations"],
@@ -121,7 +143,7 @@ class UseCases:
             variants_capped=row["ja3_variants_capped"],
             dominant=dominant,
         )
-        payload = {
+        payload: StabilityView = {
             "class": s.klass,
             "novelty": s.novelty,
             "variants": s.variants,
@@ -137,7 +159,7 @@ class UseCases:
             payload["note"] = s.note
         return payload
 
-    def _summary(self, row: Row) -> dict:
+    def _summary(self, row: Row) -> FingerprintSummary:
         """The compact shape used in list endpoints."""
         return {
             "ja4": row["ja4"],
@@ -160,7 +182,7 @@ class UseCases:
 
     async def _detail(
         self, row: Row, top_snis: int, matched_ja3: str | None = None
-    ) -> dict:
+    ) -> FingerprintDetail:
         snis = await self._repo.top_snis(row["id"], top_snis)
         embedded = 20
         variants, variant_total, dominant = await self._repo.ja3_variants(
@@ -168,7 +190,7 @@ class UseCases:
         )
         total = row["observations"] or 1
 
-        payload = {
+        payload: FingerprintDetail = {
             **self._summary(row),
             "stability": self._stability(row, dominant),
             "ja3_raw": row["ja3_raw"],
@@ -228,7 +250,9 @@ class UseCases:
 
         return payload
 
-    async def _sni_payload(self, value: str, limit: int, offset: int) -> dict | None:
+    async def _sni_payload(
+        self, value: str, limit: int, offset: int
+    ) -> DomainDetail | None:
         """Shared by the /sni route and /search. Returns None when unobserved."""
         result = await self._repo.sni_detail(value, limit, offset)
         totals = result["totals"]
@@ -270,7 +294,7 @@ class UseCases:
 
     # ── public reads ─────────────────────────────────────────────────────────
 
-    async def get_ja3(self, value: str, *, top_snis: int) -> dict:
+    async def get_ja3(self, value: str, *, top_snis: int) -> FingerprintDetail:
         if not _JA3_RE.match(value):
             raise BadRequest("not a JA3 hash (expected 32 hex characters)")
         row = await self._repo.fingerprint_by_ja3(value.lower())
@@ -282,7 +306,7 @@ class UseCases:
             )
         return await self._detail(row, top_snis, matched_ja3=value.lower())
 
-    async def get_ja4(self, value: str, *, top_snis: int) -> dict:
+    async def get_ja4(self, value: str, *, top_snis: int) -> FingerprintDetail:
         if not _JA4_RE.match(value):
             raise BadRequest("not a JA4 string (expected a_b_c)")
         row = await self._repo.fingerprint_by_ja4(value.lower())
@@ -290,7 +314,7 @@ class UseCases:
             raise NotFound("fingerprint not observed")
         return await self._detail(row, top_snis)
 
-    async def reputation(self, client_hello: str, *, top_snis: int) -> dict:
+    async def reputation(self, client_hello: str, *, top_snis: int) -> ReputationResult:
         """Fingerprint a raw ClientHello with our own engine, then look the
         result up in the corpus. `client_hello` is base64 of the raw record."""
         try:
@@ -323,7 +347,9 @@ class UseCases:
             ),
         }
 
-    async def fingerprint_snis(self, value: str, limit: int, offset: int) -> dict:
+    async def fingerprint_snis(
+        self, value: str, limit: int, offset: int
+    ) -> FingerprintReach:
         """Page through every domain a fingerprint reached (JA3 or JA4 in path).
 
         `limit` arrives already clamped to the configured maximum.
@@ -356,7 +382,7 @@ class UseCases:
             ],
         }
 
-    async def sni(self, value: str, limit: int, offset: int) -> dict:
+    async def sni(self, value: str, limit: int, offset: int) -> DomainDetail:
         if not _HOSTNAME_RE.match(value):
             raise BadRequest("not a hostname")
         payload = await self._sni_payload(value.lower(), limit, offset)
@@ -371,7 +397,7 @@ class UseCases:
         limit: int,
         offset: int,
         alpn: str | None,
-    ) -> dict:
+    ) -> FingerprintList:
         alpn_filter: list[str] | None = None
         if alpn is not None:
             # Present-but-empty ("?alpn=") selects the no-ALPN population; a
@@ -397,7 +423,7 @@ class UseCases:
         limit: int,
         offset: int,
         category: str | None,
-    ) -> dict:
+    ) -> DomainList:
         rows, total = await self._repo.list_snis(
             sort, limit, offset, category, direction
         )
@@ -421,7 +447,7 @@ class UseCases:
 
     async def list_roots(
         self, sort: str, direction: str, limit: int, offset: int
-    ) -> dict:
+    ) -> RootList:
         rows, total = await self._repo.list_roots(sort, limit, offset, direction)
         return {
             "items": [
@@ -436,7 +462,9 @@ class UseCases:
             "total": total,
         }
 
-    async def root_hostnames(self, domain: str, limit: int, offset: int) -> dict:
+    async def root_hostnames(
+        self, domain: str, limit: int, offset: int
+    ) -> RootHostnameList:
         rows, total = await self._repo.root_hostnames(domain, limit, offset)
         return {
             "items": [
@@ -450,7 +478,7 @@ class UseCases:
             "total": total,
         }
 
-    async def search(self, q: str, *, top_snis: int) -> dict:
+    async def search(self, q: str, *, top_snis: int) -> SearchResult:
         """One box for all three input kinds — the site's front door.
 
         Reports the detected kind even when nothing matched, so the UI can say
@@ -480,7 +508,7 @@ class UseCases:
 
         return {"kind": "unknown", "match": None}
 
-    async def alpn(self) -> dict:
+    async def alpn(self) -> AlpnDistribution:
         """ALPN distribution, keyed on the offer list IN ORDER."""
         rows = await self._repo.alpn_distribution()
         total_fps = sum(r["fingerprints"] for r in rows) or 1
@@ -502,13 +530,18 @@ class UseCases:
             seg["fingerprints"] += 1
             seg["observations"] += int(fp["observations"] or 0)
 
-        def clients_of(alpn: list) -> tuple[list[dict], int, int]:
+        def clients_of(alpn: list) -> tuple[list[ClientSegment], int, int]:
             """One ALPN offer's split by client: named segments biggest-first,
             then the anonymous remainder. Also returns the named totals, so a
             row can state how much of itself it can put a name to."""
             buckets = breakdown.get(tuple(alpn), {})
-            named = [
-                {"name": n, "known": True, **w}
+            named: list[ClientSegment] = [
+                {
+                    "name": n,
+                    "known": True,
+                    "fingerprints": w["fingerprints"],
+                    "observations": w["observations"],
+                }
                 for n, w in buckets.items()
                 if n is not None
             ]
@@ -516,8 +549,17 @@ class UseCases:
                 key=lambda s: (s["fingerprints"], s["observations"]), reverse=True
             )
             anon = buckets.get(None)
-            segments = named + (
-                [{"name": None, "known": False, **anon}] if anon else []
+            segments: list[ClientSegment] = named + (
+                [
+                    {
+                        "name": None,
+                        "known": False,
+                        "fingerprints": anon["fingerprints"],
+                        "observations": anon["observations"],
+                    }
+                ]
+                if anon
+                else []
             )
             return (
                 segments,
@@ -525,7 +567,7 @@ class UseCases:
                 sum(s["observations"] for s in named),
             )
 
-        items = []
+        items: list[AlpnItem] = []
         known_fps_total = known_obs_total = 0
         for r in rows:
             segments, known_fps, known_obs = clients_of(r["alpn"])
@@ -569,7 +611,7 @@ class UseCases:
             "items": items,
         }
 
-    async def stats(self) -> dict:
+    async def stats(self) -> Stats:
         row = await self._repo.stats()
         return {
             "fingerprints": row["fingerprints"],
@@ -579,13 +621,13 @@ class UseCases:
             "last_seen": _iso(row["last_seen"]),
         }
 
-    async def graph(self) -> dict:
+    async def graph(self) -> Graph:
         """Every fingerprint and every domain as nodes, every observed
         (fingerprint, SNI) pair as an edge."""
         fps, snis, edges = await self._repo.graph_data()
         id_to_ja4 = {r["id"]: r["ja4"] for r in fps}
 
-        nodes = []
+        nodes: list[GraphNode] = []
         for r in fps:
             alpn = list(r["alpn"]) if r["alpn"] is not None else None
             known = match_known(self._catalogue, r["ja4"], alpn)
@@ -609,7 +651,7 @@ class UseCases:
                 }
             )
 
-        graph_edges = [
+        graph_edges: list[GraphEdge] = [
             {
                 "s": f"f:{id_to_ja4[e['fingerprint_id']]}",
                 "t": f"s:{e['sni']}",
@@ -668,7 +710,7 @@ class UseCases:
 
         return list(grouped.values()), skipped
 
-    async def ingest(self, data: list[str]) -> dict:
+    async def ingest(self, data: list[str]) -> IngestResult:
         """Decode, fingerprint and fold a batch of base64 ClientHellos.
 
         Authorisation is enforced upstream (the HTTP adapter's internal-route
