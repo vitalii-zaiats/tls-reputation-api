@@ -436,6 +436,20 @@ class UseCases:
             "total": total,
         }
 
+    async def root_hostnames(self, domain: str, limit: int, offset: int) -> dict:
+        rows, total = await self._repo.root_hostnames(domain, limit, offset)
+        return {
+            "items": [
+                {
+                    "sni": r["sni"],
+                    "observations": int(r["observations"]),
+                    "unique_fingerprints": r["unique_fingerprints"],
+                }
+                for r in rows
+            ],
+            "total": total,
+        }
+
     async def search(self, q: str, *, top_snis: int) -> dict:
         """One box for all three input kinds — the site's front door.
 

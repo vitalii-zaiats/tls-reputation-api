@@ -173,6 +173,25 @@ async def list_roots(
     return await _uc(request).list_roots(sort, dir, limit, offset)
 
 
+@public_router.get(
+    "/roots/{domain}/hostnames", summary="Hostnames under a registrable domain"
+)
+async def list_root_hostnames(
+    request: Request,
+    response: Response,
+    domain: str = Path(..., min_length=1, max_length=253),
+    limit: int = Query(100, ge=1),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    """The individual SNIs that roll up into one registrable domain. The bare
+    domain is often never observed itself — only its subdomains are — so a
+    /roots row drills down through here to server names that actually exist.
+    """
+    response.headers["Cache-Control"] = "public, max-age=120"
+    limit = min(limit, settings.max_limit)
+    return await _uc(request).root_hostnames(domain, limit, offset)
+
+
 @public_router.get("/search", summary="Detect input type and resolve it")
 async def search(request: Request, q: str = Query(..., min_length=3)) -> dict:
     """One box for all three input kinds — the site's front door.

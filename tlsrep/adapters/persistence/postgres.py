@@ -580,6 +580,27 @@ class PostgresFingerprintRepository:
             )
         return [dict(row) for row in rows], total
 
+    async def root_hostnames(
+        self, domain: str, limit: int, offset: int
+    ) -> tuple[list[dict], int]:
+        """The individual SNIs that roll up into one registrable domain,
+        most-observed first. The bare domain is often never observed itself —
+        only its subdomains are — so this is how a roots row drills down to
+        pages that actually exist. Returns (rows, total)."""
+        async with self._require_pool().acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT sni, observations, unique_fingerprints"
+                f" FROM snis WHERE {_ROOT_DOMAIN_SQL} = $1"
+                " ORDER BY observations DESC, sni ASC LIMIT $2 OFFSET $3",
+                domain,
+                limit,
+                offset,
+            )
+            total = await conn.fetchval(
+                f"SELECT count(*) FROM snis WHERE {_ROOT_DOMAIN_SQL} = $1", domain
+            )
+        return [dict(row) for row in rows], total
+
     async def stats(self) -> dict:
         async with self._require_pool().acquire() as conn:
             row = await conn.fetchrow(
