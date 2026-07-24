@@ -52,6 +52,7 @@ from .responses import (
     SearchResult,
     StabilityView,
     Stats,
+    Verdict,
 )
 
 log = logging.getLogger(__name__)
@@ -106,6 +107,13 @@ _TLS_VERSION_NAMES = {
 # A ClientHello above this is not a ClientHello. The record layer caps a single
 # record at 16 KiB and reassembly of a few records covers every real client.
 _MAX_HELLO_BYTES = 65536
+
+# X25519MLKEM768 — the post-quantum key share real modern browsers send and
+# almost nothing else does, so its presence is a strong "this is a browser" tell.
+_MLKEM_GROUP = 0x11EC
+# A non-browser fingerprint reaching at least this many distinct domains through
+# the proxy network is broad automation, not an incidental sighting.
+_WIDE_REACH = 5
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -345,6 +353,58 @@ class UseCases:
             "reputation": (
                 await self._detail(row, top_snis) if row is not None else None
             ),
+        }
+
+    async def verdict(self, client_hello: str) -> Verdict:
+        """A terse allow / challenge / deny for a raw ClientHello — the
+        reputation signal as one gate decision. Browsers pass (recognised, or
+        carrying the post-quantum key share almost nothing else sends): they can
+        be JS-challenged and are proxied for honest reasons. An unrecognised
+        stack ranging across many domains through the proxy network is the
+        automation this corpus exists to catch."""
+        try:
+            raw = base64.b64decode(client_hello, validate=True)
+        except (binascii.Error, ValueError):
+            raise BadRequest("client_hello is not valid base64") from None
+        fp = fingerprint(raw)
+        if fp is None:
+            raise Unprocessable(
+                "not a parseable TLS ClientHello (malformed, or arrived truncated)"
+            )
+
+        ja4 = fp["ja4"]
+        hit = match_known(self._catalogue, ja4, fp["alpn"])
+        known = hit.name if hit else None
+        browser = known is not None or _MLKEM_GROUP in fp["curves"]
+
+        row = await self._repo.fingerprint_by_ja4(ja4)
+        observed = row is not None
+        reach = int(row["unique_snis"]) if row is not None else 0
+
+        if browser:
+            outcome = "allow"
+            reason = (
+                f"recognised {known}"
+                if known
+                else "browser-shaped (MLKEM key share)"
+            )
+        elif observed and reach >= _WIDE_REACH:
+            outcome = "deny"
+            reason = f"unrecognised, reaching {reach} domains via proxies"
+        elif observed:
+            outcome = "challenge"
+            reason = "unrecognised, seen on the proxy network"
+        else:
+            outcome = "challenge"
+            reason = "unrecognised, never observed"
+
+        return {
+            "ja4": ja4,
+            "verdict": outcome,
+            "known": known,
+            "browser": browser,
+            "observed": observed,
+            "reason": reason,
         }
 
     async def fingerprint_snis(

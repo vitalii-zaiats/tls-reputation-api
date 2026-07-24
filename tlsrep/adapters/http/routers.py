@@ -69,6 +69,16 @@ async def reputation(request: Request, body: ClientHelloIn) -> dict:
     return await _uc(request).reputation(body.client_hello, top_snis=settings.top_snis)
 
 
+@public_router.post("/verdict", summary="Terse allow/challenge/deny for a ClientHello")
+async def verdict(request: Request, body: ClientHelloIn) -> dict:
+    """A one-call gate decision for a raw ClientHello: allow (recognised or
+    browser-shaped), deny (unrecognised and ranging across the proxy network),
+    or challenge. Minimal by design — the JA4 and a reason, nothing else. Feed it
+    the same base64 ClientHello record as /reputation.
+    """
+    return await _uc(request).verdict(body.client_hello)
+
+
 @public_router.get(
     "/fingerprint/{value}/snis",
     summary="Page through every domain a fingerprint reached",

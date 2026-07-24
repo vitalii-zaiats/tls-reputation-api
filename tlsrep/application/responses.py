@@ -207,6 +207,17 @@ class SearchResult(TypedDict):
     match: FingerprintDetail | DomainDetail | None
 
 
+class Verdict(TypedDict):
+    """The reputation signal distilled to one gate decision. Deliberately terse."""
+
+    ja4: str
+    verdict: str  # "allow" | "challenge" | "deny"
+    known: str | None
+    browser: bool
+    observed: bool
+    reason: str
+
+
 # ── ALPN distribution ───────────────────────────────────────────────────────
 
 
