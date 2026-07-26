@@ -63,8 +63,12 @@ jobs:
           $h = [System.Net.Http.HttpClient]::new()
           $q = [System.Net.Http.HttpRequestMessage]::new('GET','https://probe.tls-reputation.com:8443/')
           $q.Version = [Version]'2.0'
-          $q.VersionPolicy = 'RequestVersionOrHigher'
-          $h.SendAsync($q).Result.Content.ReadAsStringAsync().Result
+          $q.VersionPolicy = [System.Net.Http.HttpVersionPolicy]::RequestVersionOrHigher
+          # Send, not SendAsync().Result: a faulted task there yields null and the
+          # failure surfaces as "cannot call a method on a null-valued expression",
+          # which hides whatever actually went wrong.
+          $r = $h.Send($q)
+          $r.Content.ReadAsStringAsync().GetAwaiter().GetResult()
 
       - name: WinHTTP via BITS-style COM
         shell: pwsh
