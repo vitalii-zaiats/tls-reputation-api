@@ -20,6 +20,7 @@
   "t13d3514h1_bfa337485184_748dcdc9032a": { "name": "Python requests", "env": "Amazon Linux 2023 (OpenSSL 3)" },
   "t13d3514h1_bfa337485184_412e5362642e": { "name": "Python httpx / aiohttp", "env": "Amazon Linux 2023 (OpenSSL 3)" },
   "t13d351400_bfa337485184_0b913be0c715":   { "name": "Python urllib (stdlib)", "env": "Amazon Linux 2023 (OpenSSL 3)" },
+  "t13d3513h1_bfa337485184_a141b6f9fa1c": { "name": "Python httpx / aiohttp", "env": "Python 3.14, Fedora (OpenSSL 3, Red Hat crypto-policies). Shares ja4_b bfa337485184 with Amazon Linux 2023 — AL2023 is RHEL-derived, so the cipher default is the same Red Hat one; 35 ciphers is that policy, not the library. 13 extensions where 3.9–3.13 send 14. Observed live against this project's own probe, httpx only — not a fingerprint-matrix run." },
 
   "t12d497h1_730fb1b0ac6a_a1e935682795":  { "name": "Python httpx", "env": "Amazon Linux 2 — TLS 1.2 only (OpenSSL 1.0.2)" },
   "t12d867_e18388e7f3a3_a1e935682795":    { "name": "Python urllib (stdlib)", "env": "Amazon Linux 2 — TLS 1.2 only (OpenSSL 1.0.2)" },
