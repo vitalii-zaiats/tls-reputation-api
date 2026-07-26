@@ -1,0 +1,76 @@
+# Ground truth from a real Windows host, on demand.
+#
+# Windows is the one platform the Docker matrix cannot reach: SChannel is the OS
+# TLS stack, so nothing on Linux reproduces it. This runs the SChannel consumers
+# against the probe and prints what each one sends.
+#
+# Manual trigger only — it measures, it does not gate anything.
+name: fingerprint-windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      disable_dhe:
+        description: >-
+          Turn off the DHE_RSA GCM suites first. The corpus's largest unnamed
+          fingerprint differs from a stock Windows host by exactly those two,
+          so this is the switch that should reproduce it.
+        type: boolean
+        default: false
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    steps:
+      - name: Which Windows
+        shell: pwsh
+        run: |
+          [Environment]::OSVersion.Version.ToString()
+          (Get-CimInstance Win32_OperatingSystem).Caption
+          "PowerShell $($PSVersionTable.PSVersion)"
+
+      # Machine-wide and permanent, which is fine: the runner is thrown away.
+      - name: Disable the DHE suites
+        if: ${{ inputs.disable_dhe }}
+        shell: pwsh
+        run: |
+          foreach ($s in 'TLS_DHE_RSA_WITH_AES_256_GCM_SHA384','TLS_DHE_RSA_WITH_AES_128_GCM_SHA256') {
+            try { Disable-TlsCipherSuite -Name $s -ErrorAction Stop; "disabled $s" }
+            catch { "could not disable ${s}: $_" }
+          }
+
+      - name: PowerShell Invoke-WebRequest
+        shell: pwsh
+        run: (Invoke-WebRequest -Uri "https://probe.tls-reputation.com:8443/").Content
+
+      - name: bundled curl.exe
+        shell: cmd
+        run: curl.exe -s https://probe.tls-reputation.com:8443/
+
+      # The Windows 10 build ships libcurl without nghttp2 and refuses this.
+      # Worth asking anyway: the runner image may carry a different build.
+      - name: bundled curl.exe --http2
+        shell: cmd
+        continue-on-error: true
+        run: curl.exe --http2 -s https://probe.tls-reputation.com:8443/
+
+      # The h2-capable SChannel client that needs no extra install. This is the
+      # shape the unnamed fingerprint has: 9 extensions, ALPN h2.
+      - name: .NET HttpClient, forced to HTTP/2
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $h = [System.Net.Http.HttpClient]::new()
+          $q = [System.Net.Http.HttpRequestMessage]::new('GET','https://probe.tls-reputation.com:8443/')
+          $q.Version = [Version]'2.0'
+          $q.VersionPolicy = 'RequestVersionOrHigher'
+          $h.SendAsync($q).Result.Content.ReadAsStringAsync().Result
+
+      - name: WinHTTP via BITS-style COM
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $w = New-Object -ComObject WinHttp.WinHttpRequest.5.1
+          $w.Open('GET','https://probe.tls-reputation.com:8443/',$false)
+          $w.Send()
+          $w.ResponseText
