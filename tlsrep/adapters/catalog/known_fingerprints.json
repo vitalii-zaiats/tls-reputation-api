@@ -53,13 +53,13 @@
   "t13d521100_b262b3658495_8e6e362c5eac":   { "name": "Node.js https / axios / got (no ALPN)", "env": "Node 22 — bundled OpenSSL 3 (newer)" },
   "t13d5212h1_b262b3658495_8e6e362c5eac": { "name": "Node.js fetch / undici", "env": "Node 22 — bundled OpenSSL 3 (newer)" },
 
-  "t13d1911h2_9dc949149365_e7c285222651": { "name": "Go net/http", "env": "Go 1.21–1.23, CGO / go run — pure-Go TLS, same on any base image" },
-  "t13d1910h2_9dc949149365_97f8aa674fd9": { "name": "Go net/http", "env": "Go 1.14–1.20 — pure-Go TLS 1.3; cipher list 9dc949149365 is stable across the whole 1.13–1.23 range, only ja4_c moves" },
+  "t13d1911h2_9dc949149365_e7c285222651": { "name": "Go net/http", "env": "Go 1.21 — pure-Go TLS, same on any base image. NOT a build-mode row: measured with CGO_ENABLED=0 and =1, JA3 and JA4 byte-identical. 1.22 and 1.23 each trimmed the cipher list, so this is 1.21 alone." },
+  "t13d1910h2_9dc949149365_97f8aa674fd9": { "name": "Go net/http", "env": "Go 1.14–1.20 — pure-Go TLS 1.3; cipher list 9dc949149365 is stable across 1.13–1.21, only ja4_c moves. Measured 1.16–1.20; 1.13–1.15 predate the arm64 images used." },
   "t13d1911h2_9dc949149365_d811adc85aab": { "name": "Go net/http", "env": "Go 1.13 — pure-Go TLS 1.3 (11 extensions; distinct ja4_c from 1.14+)" },
   "t12d1610h2_8cdfa2d4673b_a6913cb1f049": { "name": "Go net/http", "env": "Go 1.12 — TLS 1.2 default (1.13 made TLS 1.3 the default); a different cipher list" },
   "t12d1609h2_8cdfa2d4673b_f9c1bad5661c": { "name": "Go net/http", "env": "Go 1.10–1.11 — TLS 1.2 (9 extensions)" },
-  "t13d1411h2_cbb2034c60b8_e7c285222651": { "name": "Go net/http", "env": "Go 1.21–1.23, static build (CGO off) — distroless/scratch; a different cipher set" },
-  "t13d1311h2_f57a46bbacb6_e7c285222651": { "name": "Go net/http (stdlib)", "env": "Go 1.23.12–1.24.13; ALPN h2,http/1.1. crypto/tls is pure Go, so the base image contributes nothing and the toolchain version is the only axis. Observed on arm64." },
+  "t13d1411h2_cbb2034c60b8_e7c285222651": { "name": "Go net/http", "env": "Go 1.22 — the default cipher list dropped from 19 to 14. Previously filed here as a CGO-off static build; that was the wrong axis. crypto/tls is pure Go and never calls into C, and CGO_ENABLED=0 vs =1 on 1.22 gives byte-identical JA3 and JA4." },
+  "t13d1311h2_f57a46bbacb6_e7c285222651": { "name": "Go net/http", "env": "Go 1.23–1.24 — the cipher list dropped again, 14 to 13. CGO_ENABLED makes no difference. JA3 differs between 1.23 and 1.24 while JA4 does not: the extension order moved, the sorted set did not." },
 
   "_java": "Java TLS is JSSE (pure Java), so the base image is irrelevant — identical on Debian and Alpine — and the JDK major sets the fingerprint. java.net.http and Apache HttpClient5 both use the JDK's default cipher list (same ja4_b 1d947a95fc68); Apache classic offers no ALPN, so its ja4_a lacks h2. OkHttp overrides the cipher list with its own restricted set (ja4_b 5e2a75874763), so it does NOT collapse onto the JDK default.",
   "t13d3112h2_1d947a95fc68_b72e173852fa": { "name": "Java java.net.http (stdlib)", "env": "JDK 11 — pure-Java JSSE, same on any base image" },
