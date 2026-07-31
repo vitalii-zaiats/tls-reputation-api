@@ -133,6 +133,19 @@ async def list_fingerprints(
     return await _uc(request).list_fingerprints(sort, dir, limit, offset, alpn)
 
 
+@public_router.get("/insights", summary="Corpus-wide shapes")
+async def get_insights(
+    request: Request,
+    limit: int = Query(10, ge=1, le=50),
+) -> dict:
+    """Totals say how much was seen; these say what shape it was in.
+
+    The flatness list is the useful one: it ranks domains by how evenly their
+    traffic split across client stacks, and a value near 1 is a rotating roster
+    of profiles rather than an audience.
+    """
+    return await _uc(request).insights(limit)
+
 @public_router.get("/snis", summary="Browse observed domains")
 async def list_snis(
     request: Request,
@@ -150,6 +163,16 @@ async def list_snis(
             "high precision, low recall."
         ),
     ),
+    pattern: str | None = Query(
+        None,
+        max_length=200,
+        description=(
+            "POSIX regular expression matched case-insensitively against the "
+            "server name. Runs under a 2s statement timeout — a pattern that "
+            "backtracks its way past that is aborted, not queued."
+        ),
+        examples=["^(login|auth|sso|account)\\.", "\\.appsflyer\\.com$"],
+    ),
 ) -> dict:
     """Domains, sortable by how varied the fingerprints reaching them are.
 
@@ -157,7 +180,7 @@ async def list_snis(
     traffic to them is split across distinct client stacks.
     """
     limit = min(limit, settings.max_limit)
-    return await _uc(request).list_snis(sort, dir, limit, offset, category)
+    return await _uc(request).list_snis(sort, dir, limit, offset, category, pattern)
 
 
 @public_router.get("/roots", summary="Browse registrable (base) domains")

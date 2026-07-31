@@ -71,6 +71,11 @@ class FingerprintRepository(Protocol):
         """Returns (rows, total)."""
         ...
 
+    async def insights(self, limit: int = 10) -> dict:
+        """Corpus-wide shapes: the JA4 collapse, the flattest and the
+        most concentrated endpoints, and the cipher-list mix."""
+        ...
+
     async def list_roots(
         self, sort: str, limit: int, offset: int, direction: str
     ) -> tuple[list[Row], int]:

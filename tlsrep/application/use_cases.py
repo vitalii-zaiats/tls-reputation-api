@@ -476,6 +476,85 @@ class UseCases:
         )
         return {"items": [self._summary(r) for r in rows], "total": total}
 
+    # Longer than any honest domain pattern, short enough that the pathological
+    # cases are hard to express.
+    MAX_PATTERN = 200
+
+    @staticmethod
+    def _validated_regex(pattern: str) -> str:
+        """Reject a bad regex here, with a 400, rather than letting Postgres
+        raise on it.
+
+        Python's `re` and Postgres's engine are not the same dialect, so this
+        cannot prove a pattern is valid over there — it catches the ordinary
+        mistakes (an unclosed group, a stray quantifier) and gives them a
+        readable message. Runaway backtracking is not handled here at all; that
+        is the statement timeout's job, because no static check can decide it.
+        """
+        pattern = pattern.strip()
+        if not pattern:
+            raise BadRequest("pattern is empty")
+        if len(pattern) > UseCases.MAX_PATTERN:
+            raise BadRequest(
+                f"pattern is longer than {UseCases.MAX_PATTERN} characters"
+            )
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise BadRequest(f"not a valid regular expression: {exc}") from exc
+        return pattern
+
+    async def insights(self, limit: int = 10) -> dict:
+        """The corpus read as shapes rather than totals.
+
+        `flatness` is the one that earns its place. Real client populations are
+        power laws — the busiest stack on a domain carries far more than its
+        1/N share — so top1_share x stacks lands in double digits for anything
+        organic. A value near 1 means every stack carried the same load, which
+        no audience does and a rotating roster of profiles does exactly.
+
+        Cipher lists are named through the same catalogue the fingerprint pages
+        use, so a platform here cannot drift from a platform there.
+        """
+        raw = await self._repo.insights(limit)
+        return {
+            "collapse": raw["collapse"],
+            "flattest": [
+                {
+                    "sni": r["sni"],
+                    "stacks": r["stacks"],
+                    "observations": int(r["observations"]),
+                    "top1_share": round(float(r["top1_share"]), 4),
+                    "flatness": round(float(r["flatness"]), 2),
+                    "category": sni_category(r["sni"]),
+                }
+                for r in raw["flattest"]
+            ],
+            "concentrated": [
+                {
+                    "sni": r["sni"],
+                    "observations": int(r["observations"]),
+                    "category": sni_category(r["sni"]),
+                }
+                for r in raw["concentrated"]
+            ],
+            "platforms": [
+                {
+                    "cipher_list": r["cipher_list"],
+                    "observations": int(r["observations"]),
+                    "ja4_rows": r["ja4_rows"],
+                    "known": self._catalogue_name(r["cipher_list"]),
+                }
+                for r in raw["platforms"]
+            ],
+        }
+
+    def _catalogue_name(self, cipher_list: str) -> str | None:
+        """A bare ja4_b hit in the catalogue, or None. Bare keys are exactly the
+        cipher lists distinctive enough to name a platform on their own."""
+        entry = self._catalogue.get(cipher_list)
+        return entry["name"] if entry else None
+
     async def list_snis(
         self,
         sort: str,
@@ -483,9 +562,12 @@ class UseCases:
         limit: int,
         offset: int,
         category: str | None,
+        pattern: str | None = None,
     ) -> DomainList:
+        if pattern is not None:
+            pattern = self._validated_regex(pattern)
         rows, total = await self._repo.list_snis(
-            sort, limit, offset, category, direction
+            sort, limit, offset, category, direction, pattern
         )
         return {
             "items": [

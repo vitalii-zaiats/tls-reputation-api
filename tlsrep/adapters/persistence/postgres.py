@@ -168,6 +168,9 @@ _SORT_COLS = {
     "last_seen": "f.last_seen",
 }
 SORT_KEYS = tuple(_SORT_COLS)
+# How long a caller's regex may run before Postgres aborts it.
+REGEX_TIMEOUT_MS = 2000
+
 SORT_DIRS = tuple(_DIR)
 
 _SNI_SORT_COLS = {
@@ -515,8 +518,9 @@ class PostgresFingerprintRepository:
         offset: int,
         category: str | None,
         direction: str,
+        pattern: str | None = None,
     ) -> tuple[list[dict], int]:
-        """List domains, optionally filtered to a name-based category.
+        """List domains, optionally filtered to a name-based category or a regex.
 
         `category="auth"` narrows to auth-looking server names. Crossed with a sort
         on unique_fingerprints or spread, that is the credential-stuffing lens: an
@@ -528,7 +532,30 @@ class PostgresFingerprintRepository:
         """
         order = _sni_order(sort, direction)
         async with self._require_pool().acquire() as conn:
-            if category == "auth":
+            if pattern is not None:
+                # A caller-supplied regex, so it runs under its own timeout.
+                # Postgres uses a backtracking engine: a pattern like (a+)+$ is
+                # linear to type and exponential to run, and 48k rows is enough
+                # to hang a worker. The timeout is the backstop that makes this
+                # safe to expose publicly at all; the transaction is only here
+                # to scope the SET LOCAL to this query.
+                async with conn.transaction():
+                    await conn.execute(
+                        f"SET LOCAL statement_timeout = '{REGEX_TIMEOUT_MS}ms'"
+                    )
+                    rows = await conn.fetch(
+                        "SELECT sni, observations, unique_fingerprints, spread,"
+                        "       first_seen, last_seen"
+                        f" FROM snis WHERE sni ~* $3 ORDER BY {order}"
+                        " LIMIT $1 OFFSET $2",
+                        limit,
+                        offset,
+                        pattern,
+                    )
+                    total = await conn.fetchval(
+                        "SELECT count(*) FROM snis WHERE sni ~* $1", pattern
+                    )
+            elif category == "auth":
                 rows = await conn.fetch(
                     "SELECT sni, observations, unique_fingerprints, spread,"
                     "       first_seen, last_seen"
@@ -550,6 +577,74 @@ class PostgresFingerprintRepository:
                 )
                 total = await conn.fetchval("SELECT count(*) FROM snis")
         return [dict(row) for row in rows], total
+
+    # A domain's stacks are never perfectly even in the wild: real populations
+    # are power laws, so the busiest client carries far more than its 1/N share.
+    # flatness is exactly that ratio — top1_share x stacks — so 1.0 is a perfect
+    # round-robin and a natural endpoint sits well into double digits. It only
+    # reads as "round-robin" once there are enough stacks for evenness to mean
+    # something, hence the floor below; with five stacks even a dominated
+    # endpoint scores low, and that is a floor effect, not a finding.
+    INSIGHT_MIN_OBS = 3000
+    INSIGHT_MIN_STACKS = 10
+
+    async def insights(self, limit: int = 10) -> dict:
+        """The corpus read back as a handful of shapes rather than totals."""
+        async with self._require_pool().acquire() as conn:
+            collapse = await conn.fetchrow(
+                "SELECT count(*) AS distinct_ja4,"
+                " count(DISTINCT split_part(ja4,'_',2)||'_'||split_part(ja4,'_',3)) AS builds,"
+                " count(DISTINCT split_part(ja4,'_',3)) AS extension_sets,"
+                " count(DISTINCT split_part(ja4,'_',2)) AS cipher_lists"
+                " FROM fingerprints"
+            )
+
+            shape_cte = (
+                "WITH s AS ("
+                " SELECT o.sni, o.count,"
+                " sum(o.count) OVER (PARTITION BY o.sni) AS tot,"
+                " row_number() OVER (PARTITION BY o.sni ORDER BY o.count DESC) AS rk,"
+                " count(*) OVER (PARTITION BY o.sni) AS stacks"
+                " FROM observations o),"
+                " agg AS ("
+                " SELECT sni, max(stacks) AS stacks, max(tot) AS observations,"
+                " max(CASE WHEN rk=1 THEN count END)::numeric/max(tot) AS top1_share"
+                " FROM s GROUP BY sni)"
+            )
+            flattest = await conn.fetch(
+                shape_cte
+                + " SELECT sni, stacks, observations, top1_share,"
+                "        top1_share*stacks AS flatness"
+                " FROM agg WHERE observations >= $1 AND stacks >= $2"
+                " ORDER BY flatness ASC LIMIT $3",
+                self.INSIGHT_MIN_OBS,
+                self.INSIGHT_MIN_STACKS,
+                limit,
+            )
+
+            # The opposite end: volume behind a single stack is one operator,
+            # not an audience.
+            concentrated = await conn.fetch(
+                "SELECT sni, observations, unique_fingerprints"
+                " FROM snis WHERE unique_fingerprints = 1"
+                " ORDER BY observations DESC LIMIT $1",
+                limit,
+            )
+
+            platforms = await conn.fetch(
+                "SELECT split_part(ja4,'_',2) AS cipher_list,"
+                " sum(observations)::bigint AS observations,"
+                " count(*) AS ja4_rows"
+                " FROM fingerprints GROUP BY 1 ORDER BY 2 DESC LIMIT $1",
+                limit,
+            )
+
+        return {
+            "collapse": dict(collapse),
+            "flattest": [dict(r) for r in flattest],
+            "concentrated": [dict(r) for r in concentrated],
+            "platforms": [dict(r) for r in platforms],
+        }
 
     async def list_roots(
         self, sort: str, limit: int, offset: int, direction: str
