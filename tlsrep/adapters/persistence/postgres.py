@@ -593,7 +593,8 @@ class PostgresFingerprintRepository:
         async with self._require_pool().acquire() as conn:
             collapse = await conn.fetchrow(
                 "SELECT count(*) AS distinct_ja4,"
-                " count(DISTINCT split_part(ja4,'_',2)||'_'||split_part(ja4,'_',3)) AS builds,"
+                " count(DISTINCT split_part(ja4,'_',2)"
+                "               ||'_'||split_part(ja4,'_',3)) AS builds,"
                 " count(DISTINCT split_part(ja4,'_',3)) AS extension_sets,"
                 " count(DISTINCT split_part(ja4,'_',2)) AS cipher_lists"
                 " FROM fingerprints"
